@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flood Detection GUI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for better aesthetics */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* Light blue-gray background */
+        }
+        .card {
+            background-color: #ffffff;
+            border-radius: 1rem; /* More rounded corners */
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .btn {
+            @apply px-6 py-3 rounded-full font-semibold transition-all duration-200 ease-in-out;
+        }
+        .btn-primary {
+            @apply bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50;
+        }
+        .btn-secondary {
+            @apply bg-gray-200 text-gray-800 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50;
+        }
+        .input-file {
+            @apply block w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 cursor-pointer focus:outline-none;
+        }
+        .image-display {
+            @apply w-full h-auto rounded-lg shadow-md border border-gray-200;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center min-h-screen p-4">
+    <div class="max-w-4xl w-full">
+        <header class="text-center py-8">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-2">Deep Learning for Flood Detection</h1>
+            <p class="text-lg text-gray-600">Analyze SAR images for flood presence using a trained U-Net model</p>
+        </header>
+
+        <main class="w-full">
+            <div class="card">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Upload SAR Image</h2>
+                <input type="file" id="sarImageInput" accept=".tif, .tiff, image/jpeg, image/png" class="input-file">
+                <p class="text-sm text-gray-500 mt-2">
+                    Upload a SAR image (preferably a `.tif` or `.tiff` file from your dataset for accurate processing by the backend).
+                    JPEG/PNG are also accepted but might undergo different processing on the backend.
+                </p>
+                <div class="flex justify-center space-x-4 mt-6">
+                    <button id="processImageBtn" class="btn btn-primary">Process Image</button>
+                    <button id="clearResultsBtn" class="btn btn-secondary">Clear Results</button>
+                </div>
+            </div>
+
+            <div id="resultsSection" class="hidden">
+                <div class="card">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">Detection Results</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="text-center">
+                            <h3 class="text-lg font-semibold text-gray-700 mb-2">Original SAR Image</h3>
+                            <img id="originalImageDisplay" class="image-display" src="" alt="Original SAR Image">
+                        </div>
+                        <div class="text-center">
+                            <h3 class="text-lg font-semibold text-gray-700 mb-2">Predicted Binary Mask</h3>
+                            <img id="binaryMaskDisplay" class="image-display" src="" alt="Predicted Binary Mask">
+                        </div>
+                        <div class="text-center">
+                            <h3 class="text-lg font-semibold text-gray-700 mb-2">Flood Overlay</h3>
+                            <img id="overlayImageDisplay" class="image-display" src="" alt="Flood Overlay">
+                        </div>
+                    </div>
+
+                    <div class="mt-8 text-center">
+                        <p class="text-xl font-bold text-gray-800">Flooded Area: <span id="floodedPercentage" class="text-blue-600">N/A</span></p>
+                        <p class="text-2xl font-extrabold mt-2">Overall Status: <span id="overallStatus" class="text-green-600">N/A</span></p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const sarImageInput = document.getElementById('sarImageInput');
+        const processImageBtn = document.getElementById('processImageBtn');
+        const clearResultsBtn = document.getElementById('clearResultsBtn');
+        const resultsSection = document.getElementById('resultsSection');
+        const originalImageDisplay = document.getElementById('originalImageDisplay');
+        const binaryMaskDisplay = document.getElementById('binaryMaskDisplay');
+        const overlayImageDisplay = document.getElementById('overlayImageDisplay');
+        const floodedPercentageSpan = document.getElementById('floodedPercentage');
+        const overallStatusSpan = document.getElementById('overallStatus');
+
+        // --- REAL ML INFERENCE CALL ---
+        // This function makes an API call to your Python Flask backend.
+        // Make sure your Flask backend (app.py) is running before you use this!
+        async function callMlInferenceBackend(file) {
+            const formData = new FormData();
+            formData.append('sar_image', file); // 'sar_image' must match the key in Flask's request.files
+
+            try {
+                // IMPORTANT: Ensure this URL matches the host and port of your Flask backend
+                // Default Flask runs on http://127.0.0.1:5000
+                const response = await fetch('http://127.0.0.1:5000/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    // Attempt to parse JSON error message from backend
+                    let errorMsg = 'Unknown error';
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.error || errorMsg;
+                    } catch (jsonError) {
+                        errorMsg = response.statusText; // Fallback to HTTP status text
+                    }
+                    throw new Error(`HTTP error! Status: ${response.status}, Message: ${errorMsg}`);
+                }
+
+                const results = await response.json(); // This will contain base64 image data and percentages
+                return results;
+
+            } catch (error) {
+                console.error("Error calling ML backend:", error);
+                throw new Error(`Failed to get prediction from backend. Please ensure the Python server is running on http://127.0.0.1:5000 and check its console for errors. Detail: ${error.message}`);
+            }
+        }
+
+        // Event listener for processing image
+        processImageBtn.addEventListener('click', async () => {
+            const file = sarImageInput.files[0];
+            if (!file) {
+                alert('Please select a SAR image file first.');
+                return;
+            }
+
+            // Display loading state
+            processImageBtn.textContent = 'Processing...';
+            processImageBtn.disabled = true;
+            clearResultsBtn.disabled = true;
+            resultsSection.classList.add('hidden'); // Hide results during processing
+
+            try {
+                const results = await callMlInferenceBackend(file); // Call the real backend
+
+                // Display results from the backend
+                // The backend sends base64 encoded JPEG strings
+                originalImageDisplay.src = `data:image/jpeg;base64,${results.original_image}`;
+                binaryMaskDisplay.src = `data:image/jpeg;base64,${results.binary_mask}`;
+                overlayImageDisplay.src = `data:image/jpeg;base64,${results.overlay_image}`;
+                floodedPercentageSpan.textContent = `${results.flooded_percentage.toFixed(2)}%`;
+                overallStatusSpan.textContent = results.overall_status;
+                overallStatusSpan.className = results.overall_status === 'Flooded' ? 'text-red-600' : 'text-green-600';
+
+                resultsSection.classList.remove('hidden'); // Show results
+
+            } catch (error) {
+                console.error("Error during image processing:", error);
+                alert(`Failed to process image: ${error.message}`);
+            } finally {
+                processImageBtn.textContent = 'Process Image';
+                processImageBtn.disabled = false;
+                clearResultsBtn.disabled = false;
+            }
+        });
+
+        // Event listener for clearing results
+        clearResultsBtn.addEventListener('click', () => {
+            sarImageInput.value = ''; // Clear file input
+            originalImageDisplay.src = '';
+            binaryMaskDisplay.src = '';
+            overlayImageDisplay.src = '';
+            floodedPercentageSpan.textContent = 'N/A';
+            overallStatusSpan.textContent = 'N/A';
+            overallStatusSpan.className = 'text-green-600'; // Reset color
+            resultsSection.classList.add('hidden'); // Hide results section
+        });
+    </script>
+</body>
+</html>
